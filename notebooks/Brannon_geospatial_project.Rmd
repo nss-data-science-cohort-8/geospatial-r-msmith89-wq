@@ -1,0 +1,108 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+### Part 1 - Burglaries
+
+You've been provided three datasets for this project:
+* burglaries_2023.csv: Contains data on the aggravated burglary incidents in Davidson County. This was obtained from https://experience.arcgis.com/experience/060537e33bff45d996ca09f84a4eb0a6/.
+* census.csv: Census tract level data on population and median income. This was obtained from the US Census American Community Survey.
+* DC: A shapefile containing Davidson County census tracts
+
+Perform a spatial join to determine the census tract in which each burglary occurred.
+
+```{r}
+library(sf)
+library(tidyverse)
+```
+```{r}
+burglaries_2023 <- read_csv('../data/burglaries_2023.csv')
+burglaries_2023
+```
+```{r}
+census <- read_csv('../data/census.csv')
+ 
+  
+```
+```{r}
+DC <- read_sf('../data/DC')
+DC
+```
+```{r}
+burglar_geo <- st_as_sf(
+  burglaries_2023 |> drop_na('latitude','longitude'), 
+    coords = c('longitude', 'latitude'),
+  crs = st_crs(DC)
+)
+burglar_geo
+```
+```{r}
+DC <- DC |> 
+  mutate(
+    latitude = as.numeric(INTPTLAT),
+    longitude = as.numeric(INTPTLON)
+    )
+```
+
+```{r}
+burg_DC <- st_join(burglar_geo, DC, join=st_within, left=FALSE)
+burg_DC
+```
+```{r}
+burg_DC <- burg_DC |> 
+  rename('tract' = 'TRACTCE') 
+burg_DC
+  
+```
+
+```{r}
+burg_DC_census <- burg_DC |> 
+  left_join(census, by = 'tract')
+burg_DC_census
+```
+
+Perform some exploraty analysis on your prepared dataset.
+
+Aggregate the data by census tract. **Warning:** each incident can appear multiple times if there are multiple victims, so be sure that you aren't double-counting any incidents. 
+
+Which census tract had the highest number of burglaries? Which census tract had the highest number of burglaries per 1000 residents? 
+
+Finally, look at the relationship between median income and number of aggravated burglaries per tract. How would you describe this relationship?
+
+```{r}
+burg_DC_census |> 
+  filter(grepl('WHITE', incident_location)) |> 
+  count()
+```
+```{r}
+burg_tract <- burg_DC_census |> 
+  filter(median_income>0) |> 
+  group_by(tract) |> 
+  distinct(incident_number, .keep_all = TRUE)
+burg_tract  
+```
+
+```{r}
+burg_count <- burg_tract |>
+  count(tract) |> 
+  arrange(desc(n))
+burg_count  
+```
+Census tract 16000 had the highest number of burglaries.
+
+```{r}
+burg_count <- burg_count |>
+  left_join(census, by = 'tract') |>
+  mutate(burg_per_thousand = n * 1000/population) |> 
+  arrange(desc(burg_per_thousand))
+
+```
+Tract 16000 has the highest number of burglaries per 1,000 residents.
+```{r}
+burg_count |> 
+  st_drop_geometry() |> 
+  ggplot(aes(median_income, n)) + geom_point()
+```
+There seems to be a negative exponential relationship between median income and number of burglaries per tract, the higher the median income the lower the number of burglaries.
+
