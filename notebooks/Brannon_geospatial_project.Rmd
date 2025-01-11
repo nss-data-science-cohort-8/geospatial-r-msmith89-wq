@@ -71,17 +71,37 @@ Which census tract had the highest number of burglaries? Which census tract had 
 Finally, look at the relationship between median income and number of aggravated burglaries per tract. How would you describe this relationship?
 
 ```{r}
+ggplot(burg_DC_census, aes(x = median_income)) + geom_histogram()
+```
+
+
+```{r}
 burg_DC_census |> 
   filter(grepl('WHITE', incident_location)) |> 
   count()
 ```
 ```{r}
 burg_tract <- burg_DC_census |> 
-  filter(median_income>0) |> 
+  filter(median_income>0 & population>0) |> 
   group_by(tract) |> 
   distinct(incident_number, .keep_all = TRUE)
 burg_tract  
 ```
+
+```{r}
+ggplot(burg_tract, aes(x = median_income)) + geom_histogram()
+```
+
+```{r}
+burg_tract |> 
+  ggplot(aes(x = population)) + geom_histogram()
+```
+
+```{r}
+burg_tract |> 
+  arrange(population)
+```
+
 
 ```{r}
 burg_count <- burg_tract |>
@@ -96,13 +116,80 @@ burg_count <- burg_count |>
   left_join(census, by = 'tract') |>
   mutate(burg_per_thousand = n * 1000/population) |> 
   arrange(desc(burg_per_thousand))
+burg_count
 
 ```
 Tract 16000 has the highest number of burglaries per 1,000 residents.
+
+```{r}
+burg_count |> 
+  
+```
+
+
 ```{r}
 burg_count |> 
   st_drop_geometry() |> 
   ggplot(aes(median_income, n)) + geom_point()
 ```
 There seems to be a negative exponential relationship between median income and number of burglaries per tract, the higher the median income the lower the number of burglaries.
+
+```{r}
+burg_count |> 
+  st_drop_geometry() |> 
+  ggplot(aes(x = median_income, y = burg_per_thousand)) + geom_point()
+```
+
+
+### Bonus: Statistical Modeling
+
+Fit a Poisson regression model with target variable the rate of burglaries per census tract and with predictor the median income. Offset using the log of the population so that we are looking at the rate of burglaries per population instead of the number of burglaries. How can you interpret the meaning of the output? How do the estimates from the model compare to the observed data?
+
+```{r}
+burg_poisson <- glm(`n` ~ median_income + offset(log(population)), family = poisson, data = burg_count)
+
+summary(burg_poisson)
+```
+```{r}
+median_income <- seq(from = 20000, to = 180000, length.out = 5)
+population = 4000
+
+map(median_income, \(x) tibble(median_income = x, num_burglaries = 0:20, probability = dpois(0:20, lambda = predict(burg_poisson, newdata = tibble(median_income = x, population = population), type = 'response')))) |> 
+  bind_rows() |> 
+  ggplot(aes(x = num_burglaries, y = probability)) + geom_col() + facet_wrap(~median_income)
+```
+```{r}
+install.packages("AER")
+library(AER)
+
+dispersiontest(burg_poisson)
+```
+```{r}
+burg_quasipoisson <- glm(`n` ~ median_income + offset(log(population)), family = quasipoisson, data = burg_count)
+
+summary(burg_quasipoisson)
+```
+```{r}
+library(MASS)
+
+burg_nb <- glm.nb(`n` ~ median_income + offset(log(population)), data = burg_count)
+
+summary(burg_nb)
+```
+
+```{r}
+burg_nb$theta
+```
+```{r}
+median_income <- seq(from = 20000, to = 180000, length.out = 5)
+population = 4000
+
+mu <- predict(burg_nb, newdata = tibble(median_income = median_income, population = population), type = 'response')
+
+var <- mu + mu^2 / burg_nb$theta
+
+map(median_income, \(x) tibble(median_income = x, num_burglaries = 0:20, probability = dnbinom(0:20, mu = predict(burg_nb, newdata = tibble(median_income = x, population = population), type = 'response'), size = burg_nb$theta))) |> 
+  bind_rows() |> 
+  ggplot(aes(x = num_burglaries, y = probability)) + geom_col() + facet_wrap(~median_income)
+```
 
